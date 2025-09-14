@@ -86,13 +86,29 @@ def transcribe_with_whisper(audio_path: str, model_size: str = "small") -> str:
     from faster_whisper import WhisperModel
     use_gpu = False
     try:
-        import torch
-        use_gpu = torch.cuda.is_available()
+        import GPUtil
+
+        gpus = GPUtil.getGPUs()
+        if not gpus:
+            use_gpu = False
+
+        is_nvidia = False
+        for gpu in gpus:
+            if "nvidia" in gpu.name.lower():
+                is_nvidia = True
+                break
+
+        if is_nvidia:
+            use_gpu = True
+        else:
+            use_gpu = False
     except Exception:
         use_gpu = False
 
     device = "cuda" if use_gpu else "cpu"
     compute_type = "float16" if use_gpu else "int8"
+
+    print(f"\nDevice: {device}\nCompute Type: {compute_type}")
 
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     segments, _info = model.transcribe(audio_path, language="en")
