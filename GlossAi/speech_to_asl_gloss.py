@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-Speech → English transcript (Whisper) → ASL GLOSS → (optional) 3D avatar via SiGML
-
-- Local Whisper transcription (no API key).
-- Heuristic English → ASL GLOSS rules.
-- Optional: load a "gloss library" CSV for canonical ID-gloss labels (ASL-LEX/WLASL/Signbank export).
-- Optional: load an English→ID-gloss "mapping" CSV (supports multi-word phrases).
-- Optional: send SiGML to CWASA/JASigning "SiGML Player" on TCP 8052.
-- Optional: fingerspelling fallback using A..Z .sigml files for unknown glosses.
-
-Usage examples:
-  python speech_to_asl_gloss_3d.py demo.wav --model small
-  python speech_to_asl_gloss_3d.py demo.wav --gloss_csv data/glosses_sample.csv
-  python speech_to_asl_gloss_3d.py demo.wav --gloss_csv data/glosses_sample.csv --gloss_map_csv data/gloss_map.csv
-  python speech_to_asl_gloss_3d.py demo.wav --send_to_avatar --sigml_map_csv data/gloss2sigml.csv
-"""
 
 import argparse, os, re, sys, socket, time, string
 from typing import List, Tuple, Set, Optional, Dict
@@ -90,19 +73,30 @@ def load_sigml_map(csv_path: str) -> Dict[str, str]:
     return m
 
 # ==============================
-# 1) TRANSCRIPTION (Whisper)
+# 1) TRANSCRIPTION (faster-whisper)
 # ==============================
 
 def transcribe_with_whisper(audio_path: str, model_size: str = "small") -> str:
-    """Transcribe English speech using open-source Whisper (requires ffmpeg, torch)."""
+    """
+    Transcribe English speech using faster-whisper (CTranslate2).
+    Chooses device/compute automatically:
+      - GPU available → device="cuda", compute_type="float16"
+      - otherwise     → device="cpu",  compute_type="int8"
+    """
+    from faster_whisper import WhisperModel
+    use_gpu = False
     try:
-        import whisper  # noqa
-    except Exception as e:
-        raise RuntimeError("Whisper not installed. Run: pip install openai-whisper") from e
-    import torch, whisper
-    model = whisper.load_model(model_size)
-    result = model.transcribe(audio_path, language="en", fp16=torch.cuda.is_available())
-    return (result.get("text") or "").strip()
+        import torch
+        use_gpu = torch.cuda.is_available()
+    except Exception:
+        use_gpu = False
+
+    device = "cuda" if use_gpu else "cpu"
+    compute_type = "float16" if use_gpu else "int8"
+
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    segments, _info = model.transcribe(audio_path, language="en")
+    return " ".join(seg.text for seg in segments).strip()
 
 # ==============================
 # 2) ENGLISH → ASL GLOSS
@@ -315,7 +309,7 @@ def run(audio_path: str,
 def main():
     ap = argparse.ArgumentParser(description="Speech → English → ASL GLOSS → (optional) 3D avatar via SiGML")
     ap.add_argument("audio", help="Path to audio file (wav, mp3, m4a, etc.)")
-    ap.add_argument("--model", default="small", help="Whisper model: tiny|base|small|medium|large")
+    ap.add_argument("--model", default="small", help="faster-whisper model: tiny|base|small|medium|large-v3, etc.")
     ap.add_argument("--gloss_csv", default="", help="CSV of ID gloss labels (ASL-LEX / WLASL / Signbank export)")
     ap.add_argument("--gloss_map_csv", default="", help="CSV (english,gloss) for explicit EN→IDG mapping (phrases allowed)")
     ap.add_argument("--send_to_avatar", action="store_true", help="Send SiGML to CWASA/JASigning SiGML Player (port 8052)")
