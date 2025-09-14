@@ -1,3 +1,4 @@
 faster-whisper>=1.0.0
 regex>=2024.5.15
 ffmpeg-python>=0.2.0
+gputil>=1.4.0
